@@ -1,21 +1,28 @@
 // bookmarklet.js
 // Put this file on GitHub and use the raw URL in a small loader bookmarklet.
-// Example: javascript:(function(){fetch('https://raw.githubusercontent.com/USER/REPO/branch/bookmarklet.js').then(r=>r.text()).then(eval)})()
+// Example loader: javascript:(function(){fetch('https://raw.githubusercontent.com/USER/REPO/branch/bookmarklet.js').then(r=>r.text()).then(eval)})()
 
 (function () {
     'use strict';
 
-    // ---------- CONFIG ----------
-    // Replace this with your working API base (must support CORS).
-    const API_BASE = 'https://your.api.domain'; // <-- EDIT ME
-    // Toggle this to true for offline debugging (no network calls)
+    // ------------------ CONFIG (EDIT HERE) ------------------
+    // WARNING: Storing an API key in client-side code is insecure.
+    // Replace the value below with your key only if you understand the risk.
+    const GROQ_API_KEY = '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'; // <-- PUT YOUR GROQ API KEY HERE
+
+    // Groq-compatible OpenAI-style chat completions endpoint
+    // (POST https://api.groq.com/openai/v1/chat/completions)
+    const API_BASE = 'https://api.groq.com/openai/v1';
+    const ENDPOINT_ASK = API_BASE + '/chat/completions';
+
+    // Groq model to call
+    const GROQ_MODEL = 'llama-3.1-8b-instant';
+
+    // Toggle to true for offline debugging (no network calls)
     const DISABLE_REMOTE = false;
+    // ---------------------------------------------------------
 
-    // URLs built from config
-    const ENDPOINT_ASK = API_BASE + '/ask';
-    const ENDPOINT_LOG = API_BASE + '/data';
-
-    // ---------- small helper to load remote libs (used by init) ----------
+    // small helper to load remote libs
     function loadScript(url) {
         return new Promise((resolve, reject) => {
             const s = document.createElement('script');
@@ -26,7 +33,6 @@
         });
     }
 
-    // ---------- CLASS ----------
     class AssessmentHelper {
         constructor() {
             // state
@@ -36,23 +42,23 @@
             this.cachedArticle = null;
             this.isFetchingAnswer = false;
 
-            // network config (instance-level so methods can reference easily)
+            // network config
             this.API_BASE = API_BASE;
             this.ENDPOINT_ASK = ENDPOINT_ASK;
-            this.ENDPOINT_LOG = ENDPOINT_LOG;
             this.disableRemote = DISABLE_REMOTE;
+            this.GROQ_API_KEY = GROQ_API_KEY;
+            this.GROQ_MODEL = GROQ_MODEL;
 
-            // Ensure not duplicated
+            // Avoid duplicate injection
             if (document.getElementById('Launcher')) {
                 console.log('AssessmentHelper already injected.');
                 return;
             }
 
-            // load libraries then init
+            // optional libs for UI
             this.animeUrl = 'https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js';
             this.draggabillyUrl = 'https://unpkg.com/draggabilly@3/dist/draggabilly.pkgd.min.js';
 
-            // If DOM still loading, wait
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', () => this.init());
             } else {
@@ -61,24 +67,13 @@
         }
 
         async init() {
-            // Try to load libs but do not fail hard if they don't load
-            try {
-                await loadScript(this.animeUrl);
-            } catch (e) {
-                console.warn('Anime.js failed to load (continuing without intro animation).', e);
-            }
-            try {
-                await loadScript(this.draggabillyUrl);
-            } catch (e) {
-                console.warn('Draggabilly failed to load (dragging may be limited).', e);
-            }
+            try { await loadScript(this.animeUrl); } catch (e) { console.warn('Anime.js failed to load.', e); }
+            try { await loadScript(this.draggabillyUrl); } catch (e) { console.warn('Draggabilly failed to load.', e); }
 
-            // Create UI
             this.itemMetadata = { UI: this.createUI(), answerUI: this.createAnswerUI() };
             this.playIntroAnimation();
         }
 
-        // ---------- tiny DOM helpers ----------
         createEl(tag, props = {}) {
             const el = document.createElement(tag);
             Object.keys(props).forEach((k) => {
@@ -100,14 +95,8 @@
             }
         }
 
-        // Utility to resolve resource URLs if needed (bookmarklet doesn't bundle icons)
-        getUrl(path) {
-            // If you host icons, you can prefix with your repo raw url here.
-            // For now just return path as-is (most icons in bookmarklet used remote URLs).
-            return path;
-        }
+        getUrl(path) { return path; }
 
-        // ---------- UI creation ----------
         createUI() {
             const container = this.createEl('div');
 
@@ -123,7 +112,6 @@
                 style: 'width:100%;height:24px;cursor:move;background:transparent;position:absolute;top:0;'
             });
 
-            // UI image (logo). Replace with your hosted image if needed.
             const uiImg = this.createEl('img', {
                 src: 'https://raw.githubusercontent.com/Cpmjaguar1234/nova/refs/heads/main/nova%20logo%20png.png',
                 style: 'width:90px;height:90px;margin-top:32px;border-radius:50%;object-fit:cover;'
@@ -141,7 +129,6 @@
                     'background:#1a1a1a;border:none;color:white;padding:12px 20px;border-radius:8px;cursor:pointer;margin-top:24px;width:120px;height:44px;font-size:16px;transition:background 0.2s ease, transform 0.1s ease;display:flex;justify-content:center;align-items:center;'
             });
 
-            // Loading indicator (spinner)
             const loadingIndicator = this.createEl('div', {
                 id: 'loadingIndicator',
                 style: 'border:4px solid rgba(255,255,255,0.15);border-radius:50%;border-top:4px solid #fff;width:20px;height:20px;animation:spin 1s linear infinite;display:none;margin-right:8px;'
@@ -228,7 +215,6 @@
             document.body.appendChild(this.itemMetadata.UI);
             document.body.appendChild(this.itemMetadata.answerUI);
 
-            // apply base CSS rules once
             this.applyStylesOnce('assessment-helper-styles', `
                 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
                 #closeButton:hover, #closeAnswerButton:hover { color: #ff6b6b; opacity: 1 !important; }
@@ -254,7 +240,6 @@
             }
         }
 
-        // ---------- content fetching & server comms ----------
         async fetchArticleContent() {
             const articleContainer = document.querySelector('#start-reading');
             let articleContent = '';
@@ -270,27 +255,47 @@
             return combinedContent;
         }
 
-        // Replaceable network function to ask the API for an answer
+        // ---------- GROQ fetchAnswer: calls Groq chat completions ----------
         async fetchAnswer(queryContent, retryCount = 0) {
             if (this.disableRemote) {
                 return 'Error: remote calls disabled (disableRemote = true)';
             }
+            if (!this.GROQ_API_KEY || this.GROQ_API_KEY === 'grq-REPLACE_ME') {
+                return 'Error: GROQ_API_KEY not set in script (edit the script to add it).';
+            }
+
             const MAX_RETRIES = 3;
             const RETRY_DELAY_MS = 1000;
+
+            // Ask strongly to return a single letter, still defensively parse output.
+            const userPrompt = `${queryContent}\n\nPROVIDE ONLY A ONE-LETTER ANSWER (A, B, C, or D). NO EXTRA TEXT.`;
 
             try {
                 const resp = await fetch(this.ENDPOINT_ASK, {
                     method: 'POST',
                     mode: 'cors',
                     cache: 'no-cache',
-                    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ q: queryContent, article: this.cachedArticle || null })
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.GROQ_API_KEY}`
+                    },
+                    body: JSON.stringify({
+                        model: this.GROQ_MODEL,
+                        messages: [
+                            { role: 'system', content: 'You are a helper that responds with exactly one letter (A, B, C, or D).' },
+                            { role: 'user', content: userPrompt }
+                        ],
+                        max_tokens: 6,
+                        temperature: 0.0
+                    })
                 });
 
                 if (!resp.ok) {
                     const errText = await resp.text().catch(() => '');
-                    if (resp.status === 500 && errText && errText.toLowerCase().includes('quota') && retryCount < MAX_RETRIES) {
-                        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+                    // Retry on 429 / 5xx
+                    if ((resp.status === 429 || resp.status >= 500) && retryCount < MAX_RETRIES) {
+                        await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (retryCount + 1)));
                         return this.fetchAnswer(queryContent, retryCount + 1);
                     }
                     throw new Error(`API request failed with status ${resp.status}: ${errText}`);
@@ -298,43 +303,44 @@
 
                 const data = await resp.json().catch(() => null);
                 if (!data) return 'Error: API returned invalid JSON';
-                return data.response ? String(data.response).trim() : (data.answer ? String(data.answer).trim() : 'No answer available');
+
+                // Groq/OpenAI-style parsing: choices[0].message.content
+                let rawText = '';
+                if (Array.isArray(data.choices) && data.choices.length > 0) {
+                    const choice = data.choices[0];
+                    rawText = (choice.message && choice.message.content) ? choice.message.content : (choice.text || '');
+                } else if (data.response && data.response.text) {
+                    // Some Groq Responses API shapes differ; try safe fallback
+                    rawText = data.response.text;
+                } else {
+                    rawText = JSON.stringify(data).slice(0, 200);
+                }
+
+                rawText = String(rawText || '').trim();
+
+                // Defensive parsing: find first letter A-D
+                const match = rawText.match(/[A-D]/i);
+                if (match) {
+                    return match[0].toUpperCase();
+                }
+
+                // If model returned something else, return the raw trimmed text so UI shows it
+                return rawText || 'No answer available';
             } catch (err) {
+                if (retryCount < MAX_RETRIES) {
+                    await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+                    return this.fetchAnswer(queryContent, retryCount + 1);
+                }
                 return `Error: ${err.message}`;
             }
         }
 
-        // Log usage; fails gracefully and doesn't block the main flow
+        // Logging stub (no-op unless you add ENDPOINT_LOG)
         async logToDataEndpoint(novaButtonClickCount = 1) {
-            if (this.disableRemote) return;
-            try {
-                const element = document.evaluate('//*[@id="profile-menu"]/div', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-                const elementText = element ? element.innerText.trim() : "Unknown";
-                const spanElement = document.querySelector('.activeClassNameNew');
-                const spanText = spanElement ? spanElement.innerText.trim() : "Unknown";
-                const payload = {
-                    user: elementText,
-                    class: spanText,
-                    time: new Date().toISOString(),
-                    novaClicks: novaButtonClickCount,
-                    ua: navigator.userAgent
-                };
-
-                const resp = await fetch(this.ENDPOINT_LOG, {
-                    method: 'POST',
-                    mode: 'cors',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                if (!resp.ok) {
-                    console.warn('logToDataEndpoint: server responded', resp.status);
-                }
-            } catch (err) {
-                console.warn('logToDataEndpoint failed:', err.message);
-            }
+            // kept intentionally simple / no-op
+            return;
         }
 
-        // ---------- setup events ----------
         setupEventListeners() {
             const launcher = document.getElementById('Launcher');
             const answerContainer = document.getElementById('answerContainer');
@@ -346,12 +352,10 @@
             const closeButton = launcher.querySelector('#closeButton');
             const closeAnswerButton = answerContainer.querySelector('#closeAnswerButton');
 
-            // Draggabilly if available
             if (typeof Draggabilly !== 'undefined') {
                 try { new Draggabilly(launcher, { handle: '.drag-handle', delay: 50 }); } catch (e) { /* ignore */ }
             }
 
-            // answer manual drag
             const answerDragHandle = answerContainer.querySelector('.answer-drag-handle');
             if (answerDragHandle) {
                 answerDragHandle.addEventListener('mousedown', (e) => {
@@ -412,7 +416,6 @@
                 closeAnswerButton.addEventListener('mouseup', () => (closeAnswerButton.style.transform = 'scale(1)'));
             }
 
-            // getAnswerButton interactions
             if (getAnswerButton) {
                 getAnswerButton.addEventListener('mouseenter', () => { getAnswerButton.style.background = '#2b2b2b'; });
                 getAnswerButton.addEventListener('mouseleave', () => { getAnswerButton.style.background = '#1a1a1a'; });
@@ -428,9 +431,6 @@
                     getAnswerButton.disabled = true;
                     if (buttonTextSpan) buttonTextSpan.style.display = 'none';
                     if (loadingIndicator) loadingIndicator.style.display = 'block';
-
-                    // fire-and-forget logging
-                    this.logToDataEndpoint(novaButtonClickCount);
 
                     const processQuestion = async (excludedAnswers = []) => {
                         try {
@@ -451,8 +451,8 @@
                                 answerContainerEl.classList.add('show');
                             }
 
-                            if (answer && ['A', 'B', 'C', 'D'].includes(answer.trim()) && !excludedAnswers.includes(answer.trim())) {
-                                const trimmedAnswer = answer.trim();
+                            if (answer && ['A', 'B', 'C', 'D'].includes(String(answer).trim()) && !excludedAnswers.includes(String(answer).trim())) {
+                                const trimmedAnswer = String(answer).trim();
                                 const options = document.querySelectorAll('[role="radio"]');
                                 const index = trimmedAnswer.charCodeAt(0) - 'A'.charCodeAt(0);
                                 if (options[index]) {
